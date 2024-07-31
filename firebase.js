@@ -5,8 +5,9 @@ import { getFirestore } from 'firebase/firestore';
 // https://firebase.google.com/docs/web/setup#available-libraries
 
 // Your web app's Firebase configuration
+require('dotenv').config();
 const firebaseConfig = {
-  apiKey: "AIzaSyDmEYOqWx07x_P2SvJat13XgP_uf4A3sEI",
+  apiKey: process.env.API_KEY,
   authDomain: "pantryapp-2db0a.firebaseapp.com",
   projectId: "pantryapp-2db0a",
   storageBucket: "pantryapp-2db0a.appspot.com",
