@@ -8,11 +8,11 @@ import { getFirestore } from 'firebase/firestore';
 require('dotenv').config();
 const firebaseConfig = {
   apiKey: process.env.API_KEY,
-  authDomain: "pantryapp-2db0a.firebaseapp.com",
-  projectId: "pantryapp-2db0a",
-  storageBucket: "pantryapp-2db0a.appspot.com",
-  messagingSenderId: "488698500380",
-  appId: "1:488698500380:web:e88f7ba33fb8c0bba296d9"
+  authDomain: process.env.AUTH_DOMAIN,
+  projectId: process.env.PROJECT_ID,
+  storageBucket: process.env.STORAGE_BUCKET,
+  messagingSenderId: process.env.SENDER_ID,
+  appId: process.env.APP_ID,
 };
 
 // Initialize Firebase
