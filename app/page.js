@@ -42,6 +42,7 @@ export default function Home() {
       inventoryList.push({ name: doc.id, ...doc.data() })
     })
     setInventory(inventoryList)
+    console.log(inventoryList)
   }
   
   useEffect(() => {
