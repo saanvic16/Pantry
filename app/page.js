@@ -1,184 +1,384 @@
-'use client'
-import React, { useEffect, useState } from 'react';
-import { Box, Stack, Typography, Button, Modal, TextField } from '@mui/material'
-import './globals.css'; // Import the global CSS file
-import { firestore } from '@/firebase';
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
 import {
-  collection,
-  doc,
-  getDocs,
-  query,
-  setDoc,
-  deleteDoc,
-  getDoc,
-} from 'firebase/firestore'
+  Box, Stack, Typography, Button, Modal, TextField, IconButton, Snackbar, Alert, InputBase, Paper, Grid, Card, CardContent, CardActions
+} from '@mui/material';
+import { firestore, auth } from '@/firebase';
+import { collection, getDocs, writeBatch, doc } from 'firebase/firestore';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { Add, Remove } from '@mui/icons-material';
+import Auth from './auth';
+import { createTheme, ThemeProvider } from '@mui/material/styles';
+import { CssBaseline } from '@mui/material';
 
-const style = {
-  position: 'absolute',
-  top: '50%',
-  left: '50%',
-  transform: 'translate(-50%, -50%)',
-  width: 400,
-  bgcolor: 'white',
-  border: '2px solid #000',
-  boxShadow: 24,
-  p: 4,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 3,
-}
+const theme = createTheme({
+  typography: {
+    fontFamily: 'Raleway, sans-serif',
+  },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          backgroundColor: '#FF6F61',
+          color: '#FFFFFF',
+          borderRadius: '12px',
+          padding: '8px 16px',
+          fontWeight: 'bold',
+          textTransform: 'none',
+          '&:hover': {
+            backgroundColor: '#FF8A80',
+          },
+        },
+      },
+    },
+    MuiTextField: {
+      styleOverrides: {
+        root: {
+          '& .MuiOutlinedInput-root': {
+            borderRadius: '12px',
+            '& fieldset': {
+              borderColor: '#FF6F61',
+            },
+            '&:hover fieldset': {
+              borderColor: '#FF6F61',
+            },
+            '&.Mui-focused fieldset': {
+              borderColor: '#FF6F61',
+            },
+          },
+        },
+      },
+    },
+  },
+});
 
-export default function Home() {
-  const [inventory, setInventory] = useState([])
-  const [open, setOpen] = useState(false)
-  const [itemName, setItemName] = useState('')
-  const [searchTerm, setSearchTerm] = useState('')
+const Page = () => {
+  const [inventory, setInventory] = useState([]);
+  const [localInventory, setLocalInventory] = useState([]);
+  const [openAdd, setOpenAdd] = useState(false);
+  const [openRemove, setOpenRemove] = useState(false);
+  const [itemName, setItemName] = useState('');
+  const [quantity, setQuantity] = useState(1);
+  const [user, setUser] = useState(null);
+  const [openSnackbar, setOpenSnackbar] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState('success');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [order, setOrder] = useState('asc');
+  const [orderBy, setOrderBy] = useState('name');
 
-  const updateInventory = async () => {
-    const snapshot = query(collection(firestore, 'inventory'))
-    const docs = await getDocs(snapshot)
-    const inventoryList = []
-    docs.forEach((doc) => {
-      inventoryList.push({ name: doc.id, ...doc.data() })
-    })
-    setInventory(inventoryList)
-    console.log(inventoryList)
-  }
-  
   useEffect(() => {
-    updateInventory()
-  }, [])
-
-  const addItem = async (item) => {
-    const docRef = doc(collection(firestore, 'inventory'), item)
-    const docSnap = await getDoc(docRef)
-    if (docSnap.exists()) {
-      const { quantity } = docSnap.data()
-      await setDoc(docRef, { quantity: quantity + 1 })
-    } else {
-      await setDoc(docRef, { quantity: 1 })
-    }
-    await updateInventory()
-  }
-  
-  const removeItem = async (item) => {
-    const docRef = doc(collection(firestore, 'inventory'), item)
-    const docSnap = await getDoc(docRef)
-    if (docSnap.exists()) {
-      const { quantity } = docSnap.data()
-      if (quantity === 1) {
-        await deleteDoc(docRef)
-      } else {
-        await setDoc(docRef, { quantity: quantity - 1 })
+    onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        loadInventory(currentUser.uid);
       }
+    });
+  }, []);
+
+  const loadInventory = useCallback(async (userId) => {
+    const snapshot = await getDocs(collection(firestore, `users/${userId}/inventory`));
+    const inventoryList = [];
+    snapshot.forEach((doc) => {
+      inventoryList.push({ name: doc.id, ...doc.data() });
+    });
+    setInventory(inventoryList);
+    setLocalInventory(inventoryList);
+  }, []);
+
+  const syncInventory = useCallback(async () => {
+    if (!user) return;
+    const batch = writeBatch(firestore);
+    localInventory.forEach(item => {
+      const docRef = doc(collection(firestore, `users/${user.uid}/inventory`), item.name);
+      batch.set(docRef, { quantity: item.quantity });
+    });
+    await batch.commit();
+    setSnackbarMessage('Inventory synced successfully!');
+    setSnackbarSeverity('success');
+    setOpenSnackbar(true);
+  }, [localInventory, user]);
+
+  const addItem = (item, qty) => {
+    setLocalInventory((prevInventory) => {
+      const updatedInventory = prevInventory.map(i => i.name === item ? { ...i, quantity: i.quantity + qty } : i);
+      if (!updatedInventory.find(i => i.name === item)) {
+        updatedInventory.push({ name: item, quantity: qty });
+      }
+      return updatedInventory;
+    });
+  };
+
+  const removeItem = (item, qty) => {
+    setLocalInventory((prevInventory) => {
+      const updatedInventory = prevInventory.map(i => i.name === item ? { ...i, quantity: Math.max(0, i.quantity - qty) } : i);
+      return updatedInventory;
+    });
+  };
+
+  const handleOpenAdd = () => setOpenAdd(true);
+  const handleCloseAdd = () => setOpenAdd(false);
+
+  const handleOpenRemove = () => setOpenRemove(true);
+  const handleCloseRemove = () => setOpenRemove(false);
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+      setSnackbarMessage('Sign out successful!');
+      setSnackbarSeverity('success');
+      setOpenSnackbar(true);
+    } catch (error) {
+      console.error('Error signing out:', error);
+      setSnackbarMessage(error.message);
+      setSnackbarSeverity('error');
+      setOpenSnackbar(true);
     }
-    await updateInventory()
-  }
+  };
 
-  const handleOpen = () => setOpen(true)
-  const handleClose = () => setOpen(false)
+  const handleCloseSnackbar = () => {
+    setOpenSnackbar(false);
+  };
 
-  // Filtered inventory based on the search term
-  const filteredInventory = inventory.filter(({ name }) =>
-    name.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  const handleSearch = (event) => {
+    setSearchTerm(event.target.value);
+  };
+
+  const handleRequestSort = (property) => {
+    const isAscending = orderBy === property && order === 'asc';
+    setOrder(isAscending ? 'desc' : 'asc');
+    setOrderBy(property);
+  };
+
+  const sortedFilteredInventory = localInventory
+    .filter((item) => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((a, b) => {
+      if (order === 'asc') {
+        return a[orderBy] > b[orderBy] ? 1 : -1;
+      } else {
+        return a[orderBy] < b[orderBy] ? 1 : -1;
+      }
+    });
 
   return (
-    <Box
-      width="100vw"
-      height="100vh"
-      display={'flex'}
-      justifyContent={'center'}
-      flexDirection={'column'}
-      alignItems={'center'}
-      gap={2}
-    >
-      <Modal
-        open={open}
-        onClose={handleClose}
-        aria-labelledby="modal-modal-title"
-        aria-describedby="modal-modal-description"
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box
+        width="100vw"
+        height="100vh"
+        bgcolor="linear-gradient(135deg, #f9f9f9, #eaeaea)"
+        display="flex"
+        flexDirection="column"
+        alignItems="center"
+        justifyContent="center"
+        padding="20px"
       >
-        <Box sx={style}>
-          <Typography id="modal-modal-title" variant="h6" component="h2">
-            Add Item
-          </Typography>
-          <Stack width="100%" direction={'row'} spacing={2}>
-            <TextField
-              id="outlined-basic"
-              label="Item"
-              variant="outlined"
-              fullWidth
-              value={itemName}
-              onChange={(e) => setItemName(e.target.value)}
-            />
-            <Button
-              variant="outlined"
-              onClick={() => {
-                addItem(itemName)
-                setItemName('')
-                handleClose()
+        {!user ? (
+          <Box display="flex" flexDirection="column" alignItems="center" p={4}>
+            <Typography variant="h2" sx={{ color: '#FF6F61', fontWeight: 700 }} mb={2} textAlign="center">
+              
+            </Typography>
+            <Auth onUserChange={(user) => user && loadInventory(user.uid)} />
+          </Box>
+        ) : (
+          <Box display="flex" flexDirection="column" alignItems="center" gap={3} p={2} width="100%" maxWidth="1200px">
+            <Stack direction="row" spacing={2} justifyContent="center">
+              <Button variant="contained" onClick={handleSignOut}>
+                Sign Out
+              </Button>
+              <Button variant="contained" onClick={handleOpenAdd}>
+                Add Item
+              </Button>
+              <Button variant="contained" onClick={handleOpenRemove}>
+                Remove Item
+              </Button>
+              <Button variant="contained" onClick={syncInventory}>
+                Save Items
+              </Button>
+            </Stack>
+            <Modal
+              open={openAdd}
+              onClose={handleCloseAdd}
+              aria-labelledby="modal-modal-title"
+              aria-describedby="modal-modal-description"
+            >
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: '90%',
+                  maxWidth: '400px',
+                  bgcolor: '#FFFFFF',
+                  boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)',
+                  p: 4,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  borderRadius: '12px',
+                }}
+              >
+                <Typography id="modal-modal-title" variant="h6" sx={{ color: '#FF6F61', fontWeight: 700 }} component="h2">
+                  Add Item
+                </Typography>
+                <Stack direction="row" spacing={2}>
+                  <TextField
+                    id="outlined-basic"
+                    label="Item"
+                    variant="outlined"
+                    fullWidth
+                    value={itemName}
+                    onChange={(e) => setItemName(e.target.value)}
+                  />
+                  <TextField
+                    id="outlined-basic"
+                    label="Quantity"
+                    type="number"
+                    variant="outlined"
+                    value={quantity}
+                    onChange={(e) => setQuantity(parseInt(e.target.value))}
+                  />
+                </Stack>
+                <Button
+                  variant="contained"
+                  onClick={() => {
+                    addItem(itemName, quantity);
+                    setItemName('');
+                    setQuantity(1);
+                    handleCloseAdd();
+                  }}
+                  sx={{ mt: 2 }}
+                >
+                  Add
+                </Button>
+              </Box>
+            </Modal>
+            <Modal
+              open={openRemove}
+              onClose={handleCloseRemove}
+              aria-labelledby="modal-modal-title"
+              aria-describedby="modal-modal-description"
+            >
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: '90%',
+                  maxWidth: '400px',
+                  bgcolor: '#FFFFFF',
+                  boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)',
+                  p: 4,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  borderRadius: '12px',
+                }}
+              >
+                <Typography id="modal-modal-title" variant="h6" sx={{ color: '#FF6F61', fontWeight: 700 }} component="h2">
+                  Remove Item
+                </Typography>
+                <Stack direction="row" spacing={2}>
+                  <TextField
+                    id="outlined-basic"
+                    label="Item"
+                    variant="outlined"
+                    fullWidth
+                    value={itemName}
+                    onChange={(e) => setItemName(e.target.value)}
+                  />
+                  <TextField
+                    id="outlined-basic"
+                    label="Quantity"
+                    type="number"
+                    variant="outlined"
+                    value={quantity}
+                    onChange={(e) => setQuantity(parseInt(e.target.value))}
+                  />
+                </Stack>
+                <Button
+                  variant="contained"
+                  onClick={() => {
+                    removeItem(itemName, quantity);
+                    setItemName('');
+                    setQuantity(1);
+                    handleCloseRemove();
+                  }}
+                  sx={{ mt: 2 }}
+                >
+                  Remove
+                </Button>
+              </Box>
+            </Modal>
+            <Box
+              sx={{
+                width: '100%',
+                flex: 1,
+                overflowY: 'auto',
+                padding: 2,
+                backgroundColor: '#F9F9F9',
+                borderRadius: '12px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 3,
               }}
             >
-              Add
-            </Button>
-          </Stack>
-        </Box>
-      </Modal>
-
-      <Box width="800px" display={'flex'} justifyContent={'space-between'}>
-        <Button variant="contained" onClick={handleOpen}>
-          Add New Item
-        </Button>
-        <TextField
-          id="search-bar"
-          label="Search"
-          variant="outlined"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-      </Box>
-
-      <Box border={'10px solid #ffcff1'}>
-        <Box
-          width="800px"
-          height="100px"
-          bgcolor={'#add8e6'}
-          display={'flex'}
-          justifyContent={'center'}
-          alignItems={'center'}
-        >
-          <Typography variant={'h2'} color={'#333'} textAlign={'center'}>
-            Inventory Items
-          </Typography>
-        </Box>
-        <Stack width="800px" height="500px" spacing={2} overflow={'auto'} padding="20px">
-          {filteredInventory.map(({ name, quantity }) => (
-            <Box
-              key={name}
-              width="100%"
-              minHeight="100px"
-              display={'flex'}
-              justifyContent={'space-between'}
-              alignItems={'center'}
-              bgcolor={'#ffcff1'}
-              paddingX={5}
-              borderRadius="10px"
-              boxShadow="0 2px 4px rgba(0, 0, 0, 0.1)"
-            >
-              <Typography variant={'h4'} color={'#333'} textAlign={'center'}>
-                {name.charAt(0).toUpperCase() + name.slice(1)}
+              <Typography variant="h5" sx={{ color: '#FF6F61', fontWeight: 700 }}>
+                Inventory Items
               </Typography>
-              <Typography variant={'h4'} color={'#333'} textAlign={'center'}>
-                Quantity: {quantity}
-              </Typography>
-              <Button variant="contained" onClick={() => removeItem(name)}>
-                Remove
-              </Button>
+              <InputBase
+                placeholder="Search items..."
+                value={searchTerm}
+                onChange={handleSearch}
+                sx={{
+                  bgcolor: '#FFFFFF',
+                  borderRadius: '12px',
+                  p: 1,
+                  width: '100%',
+                  maxWidth: '300px',
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
+                }}
+              />
+              <Grid container spacing={3}>
+                {sortedFilteredInventory.map(({ name, quantity }) => (
+                  <Grid item xs={12} sm={6} md={4} key={name}>
+                    <Card sx={{ borderRadius: '12px', boxShadow: '0 4px 10px rgba(0, 0, 0, 0.1)' }}>
+                      <CardContent>
+                        <Typography variant="h6" sx={{ fontFamily: 'Raleway, sans-serif', fontWeight: 600 }}>
+                          {name.charAt(0).toUpperCase() + name.slice(1)}
+                        </Typography>
+                        <Typography color="text.secondary" sx={{ fontFamily: 'Raleway, sans-serif' }}>
+                          Quantity: {quantity}
+                        </Typography>
+                      </CardContent>
+                      <CardActions>
+                        <IconButton onClick={() => removeItem(name, 1)} size="small">
+                          <Remove sx={{ color: '#FF6F61' }} />
+                        </IconButton>
+                        <Typography sx={{ fontFamily: 'Raleway, sans-serif' }}>{quantity}</Typography>
+                        <IconButton onClick={() => addItem(name, 1)} size="small">
+                          <Add sx={{ color: '#FF6F61' }} />
+                        </IconButton>
+                      </CardActions>
+                    </Card>
+                  </Grid>
+                ))}
+              </Grid>
             </Box>
-          ))}
-        </Stack>
+          </Box>
+        )}
+        <Snackbar open={openSnackbar} autoHideDuration={6000} onClose={handleCloseSnackbar}>
+          <Alert onClose={handleCloseSnackbar} severity={snackbarSeverity} sx={{ width: '100%' }}>
+            {snackbarMessage}
+          </Alert>
+        </Snackbar>
       </Box>
-    </Box>
-  )
-}
+    </ThemeProvider>
+  );
+};
+
+export default Page;
